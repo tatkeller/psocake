@@ -84,17 +84,7 @@ def randExpRunDet():
     while True:
         found, exp, runnum = randExpRun()
         if found:
-	    #### Temp Code
-            #get detector just to print for debugging
-            #_ds = psana.DataSource('exp=%s:run=%s:idx' % (exp, runnum))
-            #run = _ds.runs().next()
-            #times = run.times()
-            #det4print = getDetName(exp, runnum)
-            #print(exp, runnum, det4print)
-            #### End Temp Code
-
             exists = safeDataSource(exp, runnum)
-
             if exists:
                 try:
                     det = getDetName(exp, runnum)
@@ -106,7 +96,7 @@ def randExpRunDet():
 def randExpRun():
     """searches through the data files and reports a random experiment and run number
     """
-    debugMode = True #FIXME:False
+    debugMode = False #True
     choice = None
     filetype = random.choice(["cxi"])
     myList = ['cxic0415']#'['cxil8416']#['cxi08216',]#['cxilr7616']# # FIXME: psana can not handle xtcs with no events
@@ -151,10 +141,6 @@ def returnRunList(exp, run):
                 if '/reg/data/ana01' in realpath:  # FIXME: ana01 is down temporarily
                     return [False, 0, 0]
                 runList = os.listdir(realpath)
-                """for runs in runList[:]: ##removes single run
-                    if '%s'%run in runs:
-                        runList.remove(run)
-                """
                 for i,runs in enumerate(runList):
                     try:
                         runList[i] = int((re.findall("-r(\d+)-", runList[i]))[0])
@@ -162,6 +148,7 @@ def returnRunList(exp, run):
                         continue
                 runList = list(set(runList))
                 runList = filter(operator.isNumberType, runList)
+                runList.remove(run)
                 return runList
             except OSError:
                 return []
@@ -172,14 +159,6 @@ def nextExpRunDet(exp, runnum):
     while True:
         found, exp, runnum = [True, exp, runnum]
         if found:
-	    #### Temp Code
-            #get detector just to print for debugging
-            #_ds = psana.DataSource('exp=%s:run=%s:idx' % (exp, runnum))
-            #run = _ds.runs().next()
-            #times = run.times()
-            #det4print = getDetName(exp, runnum)
-            #print(exp, runnum, det4print)
-            #### End Temp Code
             exists = safeDataSource(exp, runnum)
             if exists:
                 det = getDetName(exp, runnum)
@@ -196,10 +175,10 @@ class CrystalFindingAnt:
         self.goodNumPeaks = 10
         #Minimum number of events to be found considered a good run
         self.minCrystals = 2
-        #List of good experiments with all runs evaluated
+        #List of good experiments with all runs evaluated - This ensures that an experiment will not have all 
+        # of its runs evaluated a second time
         self.goodList = []
-        #Condition for running through an entire experiment
-        self.endReached = False
+        #Condition to switch from random crawling to running through each experiment
         self.lastGood = False
 
         self.context = zmq.Context()
@@ -389,21 +368,20 @@ class CrystalFindingAnt:
                                     break
                     except:
                         print "Could not analyse this run"
-                ## by default, evaluateAllRuns is False
-                ## if this experiment has not yet been evaluated all the way through
-                ## evaluateAllRuns is turned True until the last run in the experiment
-                ## is found when it turns back to false and random crawling begins again.
-                if (self.exp not in self.goodList) and self.lastGood: #Initial time that exp is found
-                    self.goodExp = self.exp
-                    self.goodRun = self.run
-                    self.lastGood = False
-                    self.goodList.append(self.goodExp) #this if statement will not be true next run
-                    self.runList = returnRunList(self.goodExp, self.goodRun) #save list of all runs in good exp
-                    evaluateAllRuns = True #rerun loop with new alg
+                #If an experiment has not had all of its runs evaluated yet
+                # and if the last randomly selected run in this experiment was good
+                # then all the runs in this experiment should be evaluated
+                if (self.exp not in self.goodList) and self.lastGood:
+                    self.goodExp = self.exp #Save the name of this experiment
+                    self.goodRun = self.runnum #Save the run that has already been evaluated
+                    self.lastGood = False #Reset the condition that the last run was "good"
+                    self.goodList.append(self.goodExp) #Add this experiment name to the list of experiments that have had all runs evaluated
+                    self.runList = returnRunList(self.goodExp, self.goodRun) #save list of all runs in this good exp
+                    evaluateAllRuns = True #rerun loop with new algorithm that evaluates each run in an experiment
                     continue
-                if evaluateAllRuns: #If using new alg
+                if evaluateAllRuns: #If the loop is currently evaluating all of the runs in an experiment
                     if(len(self.runList) > 1):
-                        self.runList.pop(0)
+                        self.runList.pop(0) #Remove runs from the list of runs each time they are evaluated
                     else:
-                        self.runList.pop(0)#should be empty now
-                        evaluateAllRuns = False #Stop going in order, go back to random
+                        self.runList.pop(0)#Remove runs until the list is completely empty
+                        evaluateAllRuns = False #Stop evaluated all the runs of an experiment, go back to random fetching
